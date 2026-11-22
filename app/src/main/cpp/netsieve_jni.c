@@ -1,13 +1,20 @@
 #include <jni.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <android/log.h>
+#include "params.h"
 
 #define LOG_TAG "NetSieveNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 extern int original_main(int argc, char **argv);
+extern void netsieve_stop_server(void);
+extern struct params params;
+
+static struct params g_default_params;
+static int g_params_saved = 0;
 
 JNIEXPORT jstring JNICALL
 Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeAbi(JNIEnv *env, jclass clazz) {
@@ -28,6 +35,18 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeAbi(JNIEnv *env, jcl
 JNIEXPORT jint JNICALL
 Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *env, jclass clazz,
                                                                       jobjectArray args) {
+    if (!g_params_saved) {
+        g_default_params = params;
+        g_params_saved = 1;
+    } else {
+        params = g_default_params;
+    }
+
+    optind = 1;
+#ifdef __ANDROID__
+    optreset = 1;
+#endif
+
     jsize count = (*env)->GetArrayLength(env, args);
     int argc = (int) count + 1;
     char **argv = (char **) calloc((size_t) argc + 1, sizeof(char *));
@@ -63,4 +82,10 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *en
     }
     free(argv);
     return rc;
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeStopByeDpi(JNIEnv *env, jclass clazz) {
+    LOGI("Stopping byedpi server");
+    netsieve_stop_server();
 }
