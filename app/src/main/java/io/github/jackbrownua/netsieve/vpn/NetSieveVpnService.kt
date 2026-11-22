@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import hev.htproxy.TProxyService
 import io.github.jackbrownua.netsieve.MainActivity
 import io.github.jackbrownua.netsieve.core.NativeBridge
+import io.github.jackbrownua.netsieve.data.SplitMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,6 +56,7 @@ class NetSieveVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        VpnState.init(applicationContext)
         createNotificationChannel()
     }
 
@@ -107,11 +109,12 @@ class NetSieveVpnService : VpnService() {
                     throw IllegalStateException("Не удалось загрузить libnetsieve.so")
                 }
 
-                val preset = VpnState.currentPreset()
-                val args = (listOf("-i", SOCKS_HOST, "-p", SOCKS_PORT.toString()) + preset.args)
+                val strategyArgs = VpnState.effectiveArgs()
+                val strategyTitle = VpnState.effectiveTitle()
+                val args = (listOf("-i", SOCKS_HOST, "-p", SOCKS_PORT.toString()) + strategyArgs)
                     .toTypedArray()
 
-                VpnState.log("Запуск ByeDPI (${preset.title}): ${preset.args.joinToString(" ")}")
+                VpnState.log("Запуск ByeDPI ($strategyTitle): ${strategyArgs.joinToString(" ")}")
 
                 val bdThread = Thread({
                     val rc = NativeBridge.runByeDpi(args)
@@ -148,7 +151,7 @@ class NetSieveVpnService : VpnService() {
 
                 VpnState.setStatus(VpnStatus.CONNECTED)
                 VpnState.log("Защита активна")
-                updateNotification("Активно • ${preset.title}")
+                updateNotification("Активно • $strategyTitle")
                 startStatsLoop()
             } catch (t: Throwable) {
                 VpnState.log("Ошибка запуска: ${t.message ?: t.javaClass.simpleName}")
@@ -160,18 +163,51 @@ class NetSieveVpnService : VpnService() {
     }
 
     private fun buildTunInterface(): ParcelFileDescriptor? {
+        val current = VpnState.state.value
         val builder = Builder()
             .setSession("NetSieve")
             .setMtu(TUN_MTU)
             .addAddress("10.10.10.1", 24)
             .addRoute("0.0.0.0", 0)
-            .addDnsServer("1.1.1.1")
-            .addDnsServer("8.8.8.8")
 
-        try {
-            builder.addDisallowedApplication(packageName)
-        } catch (e: Exception) {
-            VpnState.log("Предупреждение addDisallowedApplication: ${e.message}")
+        val primaryDns = current.dnsPrimary.trim().ifEmpty { "1.1.1.1" }
+        runCatching { builder.addDnsServer(primaryDns) }.onFailure {
+            VpnState.log("Некорректный первичный DNS ($primaryDns), использую 1.1.1.1")
+            builder.addDnsServer("1.1.1.1")
+        }
+
+        val secondaryDns = current.dnsSecondary.trim()
+        if (secondaryDns.isNotEmpty()) {
+            runCatching { builder.addDnsServer(secondaryDns) }.onFailure {
+                VpnState.log("Некорректный вторичный DNS ($secondaryDns), пропущен")
+            }
+        }
+
+        val selected = current.selectedApps.filter { it != packageName }
+        if (current.splitMode == SplitMode.INCLUDE_SELECTED && selected.isNotEmpty()) {
+            var added = 0
+            selected.forEach { pkg ->
+                runCatching {
+                    builder.addAllowedApplication(pkg)
+                    added++
+                }
+            }
+            VpnState.log("Split Tunneling: только выбранные ($added прил.)")
+            if (added == 0) {
+                runCatching { builder.addDisallowedApplication(packageName) }
+            }
+        } else {
+            runCatching { builder.addDisallowedApplication(packageName) }
+            var excluded = 0
+            selected.forEach { pkg ->
+                runCatching {
+                    builder.addDisallowedApplication(pkg)
+                    excluded++
+                }
+            }
+            if (excluded > 0) {
+                VpnState.log("Split Tunneling: исключено $excluded прил.")
+            }
         }
 
         return builder.establish()
