@@ -1,0 +1,103 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "27.2.12479018"
+  CMAKE_VERSION: "3.22.1"
+  BYEDPI_REPO: "https://github.com/hufrea/byedpi.git"
+  BYEDPI_REF: ""
+  HEV_REPO: "https://github.com/heiher/hev-socks5-tunnel.git"
+  HEV_REF: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch native sources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fetch() {
+            local url="$1" dir="$2" marker="$3" ref="$4"
+            if [ -f "$dir/$marker" ]; then
+              echo "OK: $dir already exists"
+              return
+            fi
+            echo "Cloning $url -> $dir"
+            rm -rf "$dir"
+            git clone "$url" "$dir"
+            if [ -n "$ref" ]; then
+              git -C "$dir" checkout "$ref"
+            fi
+            git -C "$dir" submodule update --init --recursive
+          }
+
+          fetch "$BYEDPI_REPO" "app/src/main/cpp/byedpi" "main.c" "$BYEDPI_REF"
+          fetch "$HEV_REPO" "app/src/main/jni/hev-socks5-tunnel" "Android.mk" "$HEV_REF"
+
+          echo "--- byedpi ---"
+          ls app/src/main/cpp/byedpi | head -50
+          echo "--- hev-socks5-tunnel ---"
+          ls app/src/main/jni/hev-socks5-tunnel | head -50
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install SDK packages and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify native libraries inside APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          echo "APK: $APK"
+          unzip -l "$APK" | grep -E "lib/.*\.so" || { echo "Нативные библиотеки не найдены в APK"; exit 1; }
+          unzip -l "$APK" | grep -q "libnetsieve.so" || { echo "libnetsieve.so отсутствует"; exit 1; }
+          unzip -l "$APK" | grep -q "libhev-socks5-tunnel.so" || { echo "libhev-socks5-tunnel.so отсутствует"; exit 1; }
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: netsieve-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
