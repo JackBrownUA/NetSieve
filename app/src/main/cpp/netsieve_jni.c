@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <android/log.h>
 #include "params.h"
 
@@ -43,9 +44,6 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *en
     }
 
     optind = 1;
-#ifdef __ANDROID__
-    optreset = 1;
-#endif
 
     jsize count = (*env)->GetArrayLength(env, args);
     int argc = (int) count + 1;
