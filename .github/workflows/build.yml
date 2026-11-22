@@ -10,9 +10,9 @@ env:
   NDK_VERSION: "27.2.12479018"
   CMAKE_VERSION: "3.22.1"
   BYEDPI_REPO: "https://github.com/hufrea/byedpi.git"
-  BYEDPI_REF: ""
+  BYEDPI_REF: "e2684772fbda45f2ff4fc220922a010370534216"
   HEV_REPO: "https://github.com/heiher/hev-socks5-tunnel.git"
-  HEV_REF: ""
+  HEV_REF: "fc3f90040b8d4b537341c96538669a9b2e35d514"
 
 jobs:
   build:
@@ -48,10 +48,10 @@ jobs:
           fetch "$BYEDPI_REPO" "app/src/main/cpp/byedpi" "main.c" "$BYEDPI_REF"
           fetch "$HEV_REPO" "app/src/main/jni/hev-socks5-tunnel" "Android.mk" "$HEV_REF"
 
-          echo "--- byedpi ---"
-          ls app/src/main/cpp/byedpi | head -50
-          echo "--- hev-socks5-tunnel ---"
-          ls app/src/main/jni/hev-socks5-tunnel | head -50
+          if ! grep -q "netsieve_stop_server" app/src/main/cpp/byedpi/proxy.c; then
+            printf '\nvoid netsieve_stop_server(void) {\n    on_cancel(0);\n}\n' >> app/src/main/cpp/byedpi/proxy.c
+            echo "Patched byedpi/proxy.c with netsieve_stop_server"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
