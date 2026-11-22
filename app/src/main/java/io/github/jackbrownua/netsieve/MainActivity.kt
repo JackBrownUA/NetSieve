@@ -1,6 +1,7 @@
 package io.github.jackbrownua.netsieve
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
@@ -168,7 +169,7 @@ private fun NetSieveApp(
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == ComponentActivity.RESULT_OK) {
+        if (result.resultCode == Activity.RESULT_OK) {
             startVpnService()
         } else {
             VpnState.log("Пользователь отклонил разрешение VPN")
