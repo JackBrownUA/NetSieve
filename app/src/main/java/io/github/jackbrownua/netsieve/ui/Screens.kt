@@ -329,7 +329,7 @@ fun AutoPickScreen(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!isRunning) {
                     Button(
                         onClick = {
@@ -355,11 +355,12 @@ fun AutoPickScreen(
                             }
                         },
                         enabled = !vpnActive,
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Запустить тест")
+                        Text("Запустить тест", maxLines = 1)
                     }
                 } else {
                     OutlinedButton(
@@ -367,23 +368,30 @@ fun AutoPickScreen(
                             testJob?.cancel()
                             isRunning = false
                         },
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.Rounded.Stop, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Остановить")
+                        Text("Остановить", maxLines = 1)
                     }
                 }
 
                 if (bestResult != null && !isRunning) {
+                    val shortName = bestResult.preset.title.substringBefore(" (")
                     Button(
                         onClick = { onApplyPreset(bestResult.preset.id) },
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Text("Применить лучшую")
+                        Text(
+                            text = "Применить лучшую: $shortName (${bestResult.latencyMs} мс)",
+                            maxLines = 1
+                        )
                     }
                 }
-            }
+             } 
+      
 
             if (isRunning) {
                 Spacer(modifier = Modifier.height(14.dp))
