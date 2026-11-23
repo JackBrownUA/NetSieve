@@ -15,6 +15,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -53,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.jackbrownua.netsieve.core.NativeBridge
@@ -122,7 +124,9 @@ private fun NetSieveApp(
         val intent = Intent(context, NetSieveVpnService::class.java).apply {
             action = NetSieveVpnService.ACTION_STOP
         }
-        context.startService(intent)
+        runCatching { context.startService(intent) }.onFailure {
+            runCatching { context.stopService(Intent(context, NetSieveVpnService::class.java)) }
+        }
     }
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
@@ -147,23 +151,25 @@ private fun NetSieveApp(
     }
 
     val handleRadarClick: () -> Unit = {
-        if (uiState.status == VpnStatus.CONNECTED) {
-            stopVpnService()
-        } else if (uiState.status == VpnStatus.DISCONNECTED) {
-            val needNotifPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
+        if (!uiState.isAutoTesting) {
+            if (uiState.status == VpnStatus.CONNECTED) {
+                stopVpnService()
+            } else if (uiState.status == VpnStatus.DISCONNECTED) {
+                val needNotifPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
 
-            if (needNotifPerm) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                val prepareIntent = VpnService.prepare(context)
-                if (prepareIntent != null) {
-                    vpnPrepareLauncher.launch(prepareIntent)
+                if (needNotifPerm) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
-                    startVpnService()
+                    val prepareIntent = VpnService.prepare(context)
+                    if (prepareIntent != null) {
+                        vpnPrepareLauncher.launch(prepareIntent)
+                    } else {
+                        startVpnService()
+                    }
                 }
             }
         }
@@ -183,7 +189,7 @@ private fun NetSieveApp(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Локальный обход DPI • $abi • v0.3.0",
+                        text = "Локальный обход DPI • $abi • v0.4.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -203,6 +209,18 @@ private fun NetSieveApp(
                         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                     )
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                Text(
+                    text = "Crafted by JackBrownUA • Powered by Gemini",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                )
             }
         }
     ) {
