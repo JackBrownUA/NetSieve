@@ -81,7 +81,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-
+      - name: Decode exact app icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/res/drawable-nodpi
+          base64 -d scripts/ic_launcher_art.b64 > app/src/main/res/drawable-nodpi/ic_launcher_art.webp
+          ls -lh app/src/main/res/drawable-nodpi/ic_launcher_art.webp
+          
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
