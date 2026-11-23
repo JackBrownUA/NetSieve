@@ -49,8 +49,8 @@ jobs:
           fetch "$HEV_REPO" "app/src/main/jni/hev-socks5-tunnel" "Android.mk" "$HEV_REF"
 
           if ! grep -q "netsieve_stop_server" app/src/main/cpp/byedpi/proxy.c; then
-            printf '\nvoid netsieve_stop_server(void) {\n    on_cancel(0);\n}\n' >> app/src/main/cpp/byedpi/proxy.c
-            echo "Patched byedpi/proxy.c with netsieve_stop_server"
+                  printf '\nvoid netsieve_stop_server(void) {\n    int fd = server_fd;\n    server_fd = -1;\n    if (fd > 0) {\n        shutdown(fd, SHUT_RDWR);\n    }\n}\n' >> app/src/main/cpp/byedpi/proxy.c
+            echo "Patched byedpi/proxy.c with safe netsieve_stop_server"
           fi
 
       - name: Set up JDK 17
