@@ -3,6 +3,7 @@ package io.github.jackbrownua.netsieve.core
 import io.github.jackbrownua.netsieve.vpn.StrategyPreset
 import io.github.jackbrownua.netsieve.vpn.VpnState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -25,41 +26,58 @@ object StrategyTester {
     private const val TEST_HOST = "127.0.0.1"
     private const val TEST_PORT = 1081
 
+    @Volatile
+    private var activeConn: HttpsURLConnection? = null
+
+    fun abortActive() {
+        runCatching { activeConn?.disconnect() }
+        runCatching { NativeBridge.stopByeDpi() }
+    }
+
     suspend fun runAll(
         rawDomain: String,
         presets: List<StrategyPreset>,
         onStepStart: (StrategyPreset, Int) -> Unit,
         onStepResult: (StrategyTestResult) -> Unit
     ): List<StrategyTestResult> = withContext(Dispatchers.IO) {
-        val domain = rawDomain.trim()
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .substringBefore("/")
-            .ifEmpty { "github.com" }
-
+        val domain = DnsChecker.sanitizeDomain(rawDomain)
         val results = mutableListOf<StrategyTestResult>()
+
         if (!NativeBridge.ensureLoaded()) {
             VpnState.log("Автоподбор: не удалось загрузить libnetsieve.so")
             return@withContext results
         }
 
-        VpnState.log("Автоподбор: старт проверки ${presets.size} стратегий на $domain")
+        VpnState.setAutoTesting(true)
+        val completionHandle = coroutineContext[Job]?.invokeOnCompletion {
+            abortActive()
+        }
 
-        for ((index, preset) in presets.withIndex()) {
-            if (!isActive) break
-            onStepStart(preset, index)
+        try {
+            VpnState.log("Автоподбор: старт проверки ${presets.size} стратегий на $domain")
 
-            val result = testSingle(domain, preset)
-            results.add(result)
-            onStepResult(result)
+            for ((index, preset) in presets.withIndex()) {
+                if (!isActive) break
+                onStepStart(preset, index)
 
-            val statusText = if (result.success) {
-                "OK (${result.httpCode}, ${result.latencyMs} мс)"
-            } else {
-                "FAIL (${result.error ?: "таймаут"})"
+                val result = testSingle(domain, preset)
+                if (!isActive) break
+
+                results.add(result)
+                onStepResult(result)
+
+                val statusText = if (result.success) {
+                    "OK (${result.httpCode}, ${result.latencyMs} мс)"
+                } else {
+                    "FAIL (${result.error ?: "таймаут"})"
+                }
+                VpnState.log("Автоподбор [${preset.id}]: $statusText")
+                delay(200)
             }
-            VpnState.log("Автоподбор [${preset.id}]: $statusText")
-            delay(200)
+        } finally {
+            completionHandle?.dispose()
+            abortActive()
+            VpnState.setAutoTesting(false)
         }
 
         results
@@ -91,8 +109,9 @@ object StrategyTester {
                 connectTimeout = 4500
                 readTimeout = 4500
                 instanceFollowRedirects = false
-                setRequestProperty("User-Agent", "NetSieve/0.3")
+                setRequestProperty("User-Agent", "NetSieve/0.4")
             }
+            activeConn = conn
 
             return try {
                 val code = conn.responseCode
@@ -113,17 +132,12 @@ object StrategyTester {
                     error = t.message ?: t.javaClass.simpleName
                 )
             } finally {
-                conn.disconnect()
+                activeConn = null
+                runCatching { conn.disconnect() }
             }
         } finally {
-            try {
-                NativeBridge.stopByeDpi()
-            } catch (_: Throwable) {
-            }
-            try {
-                thread.join(1200)
-            } catch (_: InterruptedException) {
-            }
+            runCatching { NativeBridge.stopByeDpi() }
+            runCatching { thread.join(1500) }
         }
     }
 
