@@ -7,9 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 enum class VpnStatus {
     DISCONNECTED,
@@ -27,6 +26,7 @@ data class StrategyPreset(
 
 data class VpnUiState(
     val status: VpnStatus = VpnStatus.DISCONNECTED,
+    val isAutoTesting: Boolean = false,
     val selectedPresetId: String = "balanced",
     val customArgs: String = "-d 1 -o 1+s -s 2+s -a 1",
     val dnsPrimary: String = "1.1.1.1",
@@ -36,6 +36,8 @@ data class VpnUiState(
     val darkThemeOverride: Boolean? = null,
     val txBytes: Long = 0L,
     val rxBytes: Long = 0L,
+    val txSpeedBytesPerSec: Long = 0L,
+    val rxSpeedBytesPerSec: Long = 0L,
     val logs: List<String> = emptyList(),
     val errorMessage: String? = null
 )
@@ -80,12 +82,15 @@ object VpnState {
         )
     )
 
+    private val blockedNoArgFlags = setOf("-D", "--daemon", "-E", "--transparent", "-h", "--help", "-v", "--version")
+    private val blockedWithArgFlags = setOf("-i", "--ip", "-p", "--port", "-w", "--pidfile")
+
     private var store: SettingsStore? = null
 
     private val _state = MutableStateFlow(VpnUiState())
     val state: StateFlow<VpnUiState> = _state.asStateFlow()
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val timeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
     @Synchronized
     fun init(context: Context) {
@@ -153,6 +158,10 @@ object VpnState {
         _state.update { it.copy(darkThemeOverride = dark) }
     }
 
+    fun setAutoTesting(active: Boolean) {
+        _state.update { it.copy(isAutoTesting = active) }
+    }
+
     fun currentPreset(): StrategyPreset {
         val id = _state.value.selectedPresetId
         return presets.firstOrNull { it.id == id } ?: presets.first()
@@ -161,8 +170,8 @@ object VpnState {
     fun effectiveArgs(): List<String> {
         val cur = _state.value
         if (cur.selectedPresetId == "custom") {
-            val parsed = cur.customArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-            if (parsed.isNotEmpty()) return parsed
+            val sanitized = sanitizeCustomArgs(cur.customArgs)
+            if (sanitized.isNotEmpty()) return sanitized
         }
         return currentPreset().args
     }
@@ -174,21 +183,31 @@ object VpnState {
 
     fun setStatus(status: VpnStatus, error: String? = null) {
         _state.update {
+            val reset = status == VpnStatus.DISCONNECTED
             it.copy(
                 status = status,
                 errorMessage = error,
-                txBytes = if (status == VpnStatus.DISCONNECTED) 0L else it.txBytes,
-                rxBytes = if (status == VpnStatus.DISCONNECTED) 0L else it.rxBytes
+                txBytes = if (reset) 0L else it.txBytes,
+                rxBytes = if (reset) 0L else it.rxBytes,
+                txSpeedBytesPerSec = if (reset) 0L else it.txSpeedBytesPerSec,
+                rxSpeedBytesPerSec = if (reset) 0L else it.rxSpeedBytesPerSec
             )
         }
     }
 
-    fun updateStats(txBytes: Long, rxBytes: Long) {
-        _state.update { it.copy(txBytes = txBytes, rxBytes = rxBytes) }
+    fun updateStats(txBytes: Long, rxBytes: Long, txSpeed: Long = 0L, rxSpeed: Long = 0L) {
+        _state.update {
+            it.copy(
+                txBytes = txBytes,
+                rxBytes = rxBytes,
+                txSpeedBytesPerSec = txSpeed,
+                rxSpeedBytesPerSec = rxSpeed
+            )
+        }
     }
 
     fun log(message: String) {
-        val line = "[${timeFormat.format(Date())}] $message"
+        val line = "[${LocalTime.now().format(timeFormatter)}] $message"
         _state.update { current ->
             val updated = (current.logs + line).takeLast(250)
             current.copy(logs = updated)
@@ -197,5 +216,71 @@ object VpnState {
 
     fun clearLogs() {
         _state.update { it.copy(logs = emptyList()) }
+    }
+
+    private fun sanitizeCustomArgs(raw: String): List<String> {
+        val tokens = tokenizeArgs(raw)
+        val result = mutableListOf<String>()
+        val skipped = mutableListOf<String>()
+        var i = 0
+        while (i < tokens.size) {
+            val token = tokens[i]
+            val key = token.substringBefore("=")
+            when {
+                key in blockedNoArgFlags -> {
+                    skipped.add(token)
+                    i++
+                }
+                key in blockedWithArgFlags -> {
+                    skipped.add(token)
+                    i += if (token.contains("=")) 1 else 2
+                }
+                token.startsWith("-i") && token.length > 2 -> {
+                    skipped.add(token)
+                    i++
+                }
+                token.startsWith("-p") && token.length > 2 -> {
+                    skipped.add(token)
+                    i++
+                }
+                token.startsWith("-w") && token.length > 2 -> {
+                    skipped.add(token)
+                    i++
+                }
+                else -> {
+                    result.add(token)
+                    i++
+                }
+            }
+        }
+        if (skipped.isNotEmpty()) {
+            log("Заблокированы небезопасные флаги в ручных аргументах: ${skipped.joinToString(", ")}")
+        }
+        return result
+    }
+
+    private fun tokenizeArgs(input: String): List<String> {
+        val tokens = mutableListOf<String>()
+        val current = StringBuilder()
+        var quote: Char? = null
+        for (ch in input.trim()) {
+            when {
+                quote != null -> {
+                    if (ch == quote) quote = null else current.append(ch)
+                }
+                ch == '"' || ch == '\'' -> quote = ch
+                ch.isWhitespace() -> {
+                    if (current.isNotEmpty()) {
+                        tokens.add(current.toString())
+                        current.clear()
+                    }
+                }
+                else -> current.append(ch)
+            }
+        }
+        if (current.isNotEmpty()) {
+            tokens.add(current.toString())
+        }
+        return tokens
     }
 }
