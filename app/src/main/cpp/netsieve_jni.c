@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <pthread.h>
 #include <android/log.h>
 #include "params.h"
 
@@ -14,6 +15,8 @@ extern int original_main(int argc, char **argv);
 extern void netsieve_stop_server(void);
 extern struct params params;
 
+static pthread_mutex_t g_byedpi_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int g_byedpi_running = 0;
 static struct params g_default_params;
 static int g_params_saved = 0;
 
@@ -36,6 +39,19 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeAbi(JNIEnv *env, jcl
 JNIEXPORT jint JNICALL
 Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *env, jclass clazz,
                                                                       jobjectArray args) {
+    if (args == NULL) {
+        LOGE("args array is NULL");
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_byedpi_mutex);
+    if (g_byedpi_running) {
+        LOGE("byedpi is already running");
+        pthread_mutex_unlock(&g_byedpi_mutex);
+        return -2;
+    }
+    g_byedpi_running = 1;
+
     if (!g_params_saved) {
         g_default_params = params;
         g_params_saved = 1;
@@ -50,6 +66,8 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *en
     char **argv = (char **) calloc((size_t) argc + 1, sizeof(char *));
     if (argv == NULL) {
         LOGE("calloc failed");
+        g_byedpi_running = 0;
+        pthread_mutex_unlock(&g_byedpi_mutex);
         return -1;
     }
 
@@ -57,17 +75,33 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *en
     if (argv[0] == NULL) {
         free(argv);
         LOGE("strdup failed");
+        g_byedpi_running = 0;
+        pthread_mutex_unlock(&g_byedpi_mutex);
         return -1;
     }
 
     for (jsize i = 0; i < count; i++) {
         jstring s = (jstring) (*env)->GetObjectArrayElement(env, args, i);
-        const char *utf = (*env)->GetStringUTFChars(env, s, NULL);
-        argv[i + 1] = strdup(utf != NULL ? utf : "");
-        if (utf != NULL) {
-            (*env)->ReleaseStringUTFChars(env, s, utf);
+        if (s == NULL) {
+            argv[i + 1] = strdup("");
+        } else {
+            const char *utf = (*env)->GetStringUTFChars(env, s, NULL);
+            argv[i + 1] = strdup(utf != NULL ? utf : "");
+            if (utf != NULL) {
+                (*env)->ReleaseStringUTFChars(env, s, utf);
+            }
+            (*env)->DeleteLocalRef(env, s);
         }
-        (*env)->DeleteLocalRef(env, s);
+        if (argv[i + 1] == NULL) {
+            LOGE("strdup failed at arg %d", (int) i);
+            for (int j = 0; j <= i; j++) {
+                free(argv[j]);
+            }
+            free(argv);
+            g_byedpi_running = 0;
+            pthread_mutex_unlock(&g_byedpi_mutex);
+            return -1;
+        }
     }
     argv[argc] = NULL;
 
@@ -79,11 +113,16 @@ Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeRunByeDpi(JNIEnv *en
         free(argv[i]);
     }
     free(argv);
+
+    g_byedpi_running = 0;
+    pthread_mutex_unlock(&g_byedpi_mutex);
     return rc;
 }
 
 JNIEXPORT void JNICALL
 Java_io_github_jackbrownua_netsieve_core_NativeBridge_nativeStopByeDpi(JNIEnv *env, jclass clazz) {
-    LOGI("Stopping byedpi server");
-    netsieve_stop_server();
+    if (g_byedpi_running) {
+        LOGI("Stopping byedpi server");
+        netsieve_stop_server();
+    }
 }
