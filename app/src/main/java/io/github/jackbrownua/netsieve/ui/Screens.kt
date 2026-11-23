@@ -166,8 +166,14 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                StatBlock(label = "Отправлено", value = formatBytes(uiState.txBytes))
-                StatBlock(label = "Получено", value = formatBytes(uiState.rxBytes))
+           StatBlock(
+                    label = "Загрузка (↓ ${formatSpeed(uiState.rxSpeedBytesPerSec)})",
+                    value = formatBytes(uiState.rxBytes)
+                )
+                StatBlock(
+                    label = "Отдача (↑ ${formatSpeed(uiState.txSpeedBytesPerSec)})",
+                    value = formatBytes(uiState.txBytes)
+                )
             }
         }
 
@@ -365,6 +371,7 @@ fun AutoPickScreen(
                 } else {
                     OutlinedButton(
                         onClick = {
+                            StrategyTester.abortActive()
                             testJob?.cancel()
                             isRunning = false
                         },
@@ -905,4 +912,11 @@ private fun formatBytes(bytes: Long): String {
     if (mb < 1024.0) return String.format("%.2f МБ", mb)
     val gb = mb / 1024.0
     return String.format("%.2f ГБ", gb)
+}
+private fun formatSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec < 1024L) return "$bytesPerSec Б/с"
+    val kb = bytesPerSec / 1024.0
+    if (kb < 1024.0) return String.format("%.0f КБ/с", kb)
+    val mb = kb / 1024.0
+    return String.format("%.1f МБ/с", mb)
 }
