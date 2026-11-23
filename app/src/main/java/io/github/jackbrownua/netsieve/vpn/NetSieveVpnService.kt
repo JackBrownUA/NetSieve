@@ -15,6 +15,7 @@ import io.github.jackbrownua.netsieve.MainActivity
 import io.github.jackbrownua.netsieve.R
 import io.github.jackbrownua.netsieve.core.NativeBridge
 import io.github.jackbrownua.netsieve.data.SplitMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,9 +47,6 @@ class NetSieveVpnService : VpnService() {
 
     @Volatile
     private var byeDpiThread: Thread? = null
-
-    @Volatile
-    private var tproxyThread: Thread? = null
 
     @Volatile
     private var isStopping = false
@@ -142,18 +140,13 @@ class NetSieveVpnService : VpnService() {
                 val configFile = writeTProxyConfig()
                 val fd = pfd.fd
 
-                val tpThread = Thread({
-                    VpnState.log("Запуск hev-socks5-tunnel (fd=$fd)")
-                    TProxyService.TProxyStartService(configFile.absolutePath, fd)
-                    VpnState.log("hev-socks5-tunnel остановлен")
-                    if (!isStopping) {
-                        stopVpn()
-                    }
-                }, "NetSieve-Tun2Socks")
-                tproxyThread = tpThread
-                tpThread.start()
+                VpnState.log("Запуск hev-socks5-tunnel (fd=$fd)")
+                val started = TProxyService.TProxyStartService(configFile.absolutePath, fd)
+                if (!started) {
+                    throw IllegalStateException("hev-socks5-tunnel не смог запуститься")
+                }
 
-                delay(250)
+                delay(200)
                 if (isStopping) return@launch
 
                 VpnState.setStatus(VpnStatus.CONNECTED)
@@ -161,6 +154,8 @@ class NetSieveVpnService : VpnService() {
                 VpnState.log("Защита активна (IPv4 + IPv6)")
                 updateNotification("NetSieve • ↓ 0 Б/с  ↑ 0 Б/с", "$shortStrategy • ↓ 0 Б  ↑ 0 Б")
                 startStatsLoop(shortStrategy)
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (t: Throwable) {
                 VpnState.log("Ошибка запуска: ${t.message ?: t.javaClass.simpleName}")
                 VpnState.setStatus(VpnStatus.DISCONNECTED, t.message ?: "Ошибка запуска VPN")
@@ -273,6 +268,11 @@ class NetSieveVpnService : VpnService() {
 
             while (isActive && !isStopping) {
                 try {
+                    if (!TProxyService.TProxyIsRunning()) {
+                        VpnState.log("hev-socks5-tunnel остановился")
+                        if (!isStopping) stopVpn()
+                        break
+                    }
                     val stats = TProxyService.TProxyGetStats()
                     if (stats.size >= 4) {
                         val tx = stats[1]
@@ -340,9 +340,6 @@ class NetSieveVpnService : VpnService() {
         tunInterface = null
 
         runCatching { NativeBridge.stopByeDpi() }
-
-        runCatching { tproxyThread?.join(1200) }
-        tproxyThread = null
 
         runCatching { byeDpiThread?.join(1500) }
         byeDpiThread = null
