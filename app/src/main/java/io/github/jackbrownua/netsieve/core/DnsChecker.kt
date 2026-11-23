@@ -29,12 +29,21 @@ data class DnsCheckResult(
 
 object DnsChecker {
 
-    suspend fun check(rawDomain: String): DnsCheckResult = withContext(Dispatchers.IO) {
-        val domain = rawDomain.trim()
+    fun sanitizeDomain(rawDomain: String): String {
+        return rawDomain.trim()
+            .lowercase()
             .removePrefix("https://")
             .removePrefix("http://")
             .substringBefore("/")
+            .substringBefore("?")
+            .substringBefore("#")
+            .substringBefore(":")
+            .trim()
             .ifEmpty { "github.com" }
+    }
+
+    suspend fun check(rawDomain: String): DnsCheckResult = withContext(Dispatchers.IO) {
+        val domain = sanitizeDomain(rawDomain)
 
         val sysStart = System.currentTimeMillis()
         val systemIps = runCatching {
