@@ -45,6 +45,20 @@ data class VpnUiState(
 object VpnState {
     val presets: List<StrategyPreset> = listOf(
         StrategyPreset(
+            id = "auto_cascade",
+title = "Умный авто-каскад",
+description = "Автопереключение на лету: Сбалансированная → Агрессивная → DisOOB",
+args = listOf(
+                    "-T", "2.5",
+                "-d", "1", "-o", "1+s", "-s", "2+s",
+                "-A", "t,r,s,c", "-u", "3600",
+                "-f", "-1", "-t", "5", "-d", "1", "-s", "1+s", "-r", "1+s",
+                "-A", "t,r,s,c", "-u", "3600",
+                "-q", "1+s", "-d", "2+s", "-M", "r,h,d",
+                "-a", "1"
+            )
+        ),
+        StrategyPreset(
             id = "balanced",
             title = "Сбалансированная (HTTPS/TLS)",
             description = "Disorder + OOB + Split по SNI (универсальный режим)",
