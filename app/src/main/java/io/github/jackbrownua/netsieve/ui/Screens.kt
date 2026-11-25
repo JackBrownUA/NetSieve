@@ -278,6 +278,7 @@ private fun StatBlock(label: String, value: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AutoPickScreen(
     uiState: VpnUiState,
@@ -315,6 +316,11 @@ fun AutoPickScreen(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("GitHub" to "github.com", "MarineTraffic" to "www.marinetraffic.com", "YouTube" to "youtube.com", "Discord" to "discord.com", "Telegram" to "telegram.org").forEach { (label, host) ->
+                    FilterChip(selected = testDomain.trim().lowercase().contains(host), onClick = { if (!isRunning) testDomain = host }, label = { Text(label) })
+                    } }
             OutlinedTextField(
                 value = testDomain,
                 onValueChange = { testDomain = it },
@@ -392,8 +398,9 @@ fun AutoPickScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
-                            text = "Применить лучшую: $shortName (${bestResult.latencyMs} мс)",
-                            maxLines = 1
+                            text = "Применить: $shortName (${bestResult.latencyMs} мс)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
