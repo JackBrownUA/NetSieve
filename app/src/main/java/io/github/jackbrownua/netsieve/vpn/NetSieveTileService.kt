@@ -48,7 +48,7 @@ class NetSieveTileService : TileService() {
                     runCatching { stopService(Intent(this, NetSieveVpnService::class.java)) }
                 }
             }
-            VpnStatus.DISCONNECTED -> {
+            VpnStatus.DISCONNECTED , VpnStatus.PAUSED-> {
                 val prepareIntent = VpnService.prepare(this)
                 if (prepareIntent != null) {
                     val launchIntent = Intent(this, MainActivity::class.java).apply {
@@ -68,7 +68,7 @@ class NetSieveTileService : TileService() {
                     }
                 } else {
                     val startIntent = Intent(this, NetSieveVpnService::class.java).apply {
-                        action = NetSieveVpnService.ACTION_START
+                        action = if (current.status == VpnStatus.PAUSED) NetSieveVpnService.ACTION_RESUME else NetSieveVpnService.ACTION_START
                     }
                     ContextCompat.startForegroundService(this, startIntent)
                 }
@@ -86,6 +86,7 @@ class NetSieveTileService : TileService() {
         tile.state = when {
             state.isAutoTesting -> Tile.STATE_UNAVAILABLE
             state.status == VpnStatus.CONNECTED -> Tile.STATE_ACTIVE
+            state.status == VpnStatus.PAUSED -> Tile.STATE_INACTIVE
             state.status == VpnStatus.DISCONNECTED -> Tile.STATE_INACTIVE
             else -> Tile.STATE_UNAVAILABLE
         }
@@ -96,6 +97,7 @@ class NetSieveTileService : TileService() {
                 state.status == VpnStatus.CONNECTED -> shortStrategy
                 state.status == VpnStatus.CONNECTING -> "Запуск..."
                 state.status == VpnStatus.DISCONNECTING -> "Остановка..."
+                state.status == VpnStatus.PAUSED -> "На паузе"
                 else -> "Отключён"
             }
         }
