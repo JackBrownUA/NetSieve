@@ -14,6 +14,7 @@ enum class VpnStatus {
     DISCONNECTED,
     CONNECTING,
     CONNECTED,
+    PAUSED,
     DISCONNECTING
 }
 
@@ -49,13 +50,12 @@ object VpnState {
 title = "Умный авто-каскад",
 description = "Автопереключение на лету: Сбалансированная → Агрессивная → DisOOB",
 args = listOf(
-                    "-T", "2.5",
-                "-d", "1", "-o", "1+s", "-s", "2+s",
-                "-A", "t,r,s,c", "-u", "3600",
-                "-f", "-1", "-t", "5", "-d", "1", "-s", "1+s", "-r", "1+s",
-                "-A", "t,r,s,c", "-u", "3600",
-                "-q", "1+s", "-d", "2+s", "-M", "r,h,d",
-                "-a", "1"
+                    "-T", "2.5", "-u", "3600",
+                "-d", "1", "-o", "1+s", "-s", "2+s", "-a", "1",
+                "-A", "t,r,s",
+                "-f", "-1", "-t", "5", "-d", "1", "-s", "1+s", "-r", "1+s", "-a", "1",
+                "-A", "t,r,s",
+                "-q", "1+s", "-d", "2+s", "-M", "r,h,d", "-a", "1"
             )
         ),
         StrategyPreset(
@@ -198,13 +198,14 @@ args = listOf(
     fun setStatus(status: VpnStatus, error: String? = null) {
         _state.update {
             val reset = status == VpnStatus.DISCONNECTED
+            val resetSpeed = reset || status == VpnStatus.PAUSED
             it.copy(
                 status = status,
                 errorMessage = error,
                 txBytes = if (reset) 0L else it.txBytes,
                 rxBytes = if (reset) 0L else it.rxBytes,
-                txSpeedBytesPerSec = if (reset) 0L else it.txSpeedBytesPerSec,
-                rxSpeedBytesPerSec = if (reset) 0L else it.rxSpeedBytesPerSec
+                txSpeedBytesPerSec = if (resetSpeed) 0L else it.txSpeedBytesPerSec,
+                rxSpeedBytesPerSec = if (resetSpeed) 0L else it.rxSpeedBytesPerSec
             )
         }
     }
