@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
@@ -50,6 +51,7 @@ fun RadarButton(
         targetValue = when (status) {
             VpnStatus.CONNECTED -> Color(0xFF10B981)
             VpnStatus.CONNECTING, VpnStatus.DISCONNECTING -> Color(0xFFF59E0B)
+            VpnStatus.PAUSED -> Color(0xFFF59E0B)
             VpnStatus.DISCONNECTED -> MaterialTheme.colorScheme.primary
         },
         animationSpec = tween(400),
@@ -59,6 +61,7 @@ fun RadarButton(
     val secondaryColor by animateColorAsState(
         targetValue = when (status) {
             VpnStatus.CONNECTED -> Color(0xFF059669)
+            VpnStatus.PAUSED -> Color(0xFFB45309)
             VpnStatus.CONNECTING, VpnStatus.DISCONNECTING -> Color(0xFFD97706)
             VpnStatus.DISCONNECTED -> MaterialTheme.colorScheme.primaryContainer
         },
@@ -147,7 +150,7 @@ fun RadarButton(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
-                    imageVector = if (isConnected) Icons.Rounded.Shield else Icons.Rounded.PowerSettingsNew,
+                    imageVector = when (status) { VpnStatus.CONNECTED -> Icons.Rounded.Shield; VpnStatus.PAUSED -> Icons.Rounded.Pause; else -> Icons.Rounded.PowerSettingsNew },
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(44.dp)
@@ -158,6 +161,7 @@ fun RadarButton(
                         VpnStatus.DISCONNECTED -> "ЗАПУСТИТЬ"
                         VpnStatus.CONNECTING -> "ЗАПУСК..."
                         VpnStatus.CONNECTED -> "АКТИВЕН"
+                        VpnStatus.PAUSED -> "НА ПАУЗЕ"
                         VpnStatus.DISCONNECTING -> "СТОП..."
                     },
                     color = Color.White,
