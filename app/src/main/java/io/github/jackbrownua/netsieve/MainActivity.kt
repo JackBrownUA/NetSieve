@@ -154,7 +154,7 @@ private fun NetSieveApp(
         if (!uiState.isAutoTesting) {
             if (uiState.status == VpnStatus.CONNECTED) {
                 stopVpnService()
-            } else if (uiState.status == VpnStatus.DISCONNECTED) {
+            } else if (uiState.status == VpnStatus.PAUSED) { val intent = Intent(context, NetSieveVpnService::class.java).apply { action = NetSieveVpnService.ACTION_RESUME }; ContextCompat.startForegroundService(context, intent) } else if (uiState.status == VpnStatus.DISCONNECTED) {
                 val needNotifPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     ContextCompat.checkSelfPermission(
                         context,
