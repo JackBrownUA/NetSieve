@@ -83,10 +83,10 @@ fun HomeScreen(
     onSelectPreset: (String) -> Unit,
     onUpdateCustomArgs: (String) -> Unit
 ) {
-    val isDisconnected = uiState.status == VpnStatus.DISCONNECTED
+    val isDisconnected = uiState.status == VpnStatus.DISCONNECTED || uiState.status == VpnStatus.PAUSED
     val statusColor = when (uiState.status) {
         VpnStatus.CONNECTED -> NetSieveColors.Emerald
-        VpnStatus.CONNECTING, VpnStatus.DISCONNECTING -> NetSieveColors.Amber
+        VpnStatus.CONNECTING, VpnStatus.DISCONNECTING, VpnStatus.PAUSED -> NetSieveColors.Amber
         VpnStatus.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -120,6 +120,7 @@ fun HomeScreen(
                         VpnStatus.DISCONNECTED -> "Отключён"
                         VpnStatus.CONNECTING -> "Запуск..."
                         VpnStatus.CONNECTED -> "Активен"
+                        VpnStatus.PAUSED -> "На паузе"
                         VpnStatus.DISCONNECTING -> "Остановка..."
                     },
                     color = statusColor
@@ -131,6 +132,7 @@ fun HomeScreen(
             Text(
                 text = when (uiState.status) {
                     VpnStatus.CONNECTED -> "127.0.0.1:1080 → TUN • DNS ${uiState.dnsPrimary}"
+                    VpnStatus.PAUSED -> "На паузе • Нажмите радар для возобновления"
                     else -> "Локальный режим ($abi) • DNS ${uiState.dnsPrimary}"
                 },
                 style = MaterialTheme.typography.bodyMedium,
