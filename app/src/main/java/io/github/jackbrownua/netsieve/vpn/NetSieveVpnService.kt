@@ -32,6 +32,8 @@ class NetSieveVpnService : VpnService() {
 
     companion object {
         const val ACTION_START = "io.github.jackbrownua.netsieve.START"
+        const val ACTION_PAUSE = "io.github.jackbrownua.netsieve.PAUSE"
+        const val ACTION_RESUME = "io.github.jackbrownua.netsieve.RESUME"
         const val ACTION_STOP = "io.github.jackbrownua.netsieve.STOP"
         private const val CHANNEL_ID = "netsieve_vpn_channel"
         private const val NOTIFICATION_ID = 1001
@@ -51,6 +53,9 @@ class NetSieveVpnService : VpnService() {
     @Volatile
     private var isStopping = false
 
+    @Volatile
+    private var isPaused = false
+
     private var statsJob: Job? = null
 
     override fun onCreate() {
@@ -65,9 +70,20 @@ class NetSieveVpnService : VpnService() {
                 stopVpn()
                 return START_NOT_STICKY
             }
+            ACTION_PAUSE -> {
+                pauseVpn()
+                return START_NOT_STICKY
+            }
+            ACTION_RESUME -> {
+                val cur = VpnState.state.value
+                if ((cur.status == VpnStatus.PAUSED || cur.status == VpnStatus.DISCONNECTED) && !cur.isAutoTesting) {
+                    startVpn()
+                }
+                return START_NOT_STICKY
+            }
             ACTION_START, null -> {
                 val cur = VpnState.state.value
-                if (cur.status == VpnStatus.DISCONNECTED && !cur.isAutoTesting) {
+                if ((cur.status == VpnStatus.DISCONNECTED || cur.status == VpnStatus.PAUSED) && !cur.isAutoTesting) {
                     startVpn()
                 }
             }
@@ -82,18 +98,24 @@ class NetSieveVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        stopVpnInternal()
+        stopTunnelCore()
+        stopForegroundNotification()
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun startVpn() {
         isStopping = false
+        isPaused = false
         VpnState.setStatus(VpnStatus.CONNECTING)
         NetSieveTileService.requestSync(this)
         VpnState.log("Запуск NetSieve...")
 
-        val notification = buildNotification("NetSieve", "Подключение...")
+        val notification = buildNotification(
+            title = "NetSieve",
+            text = "Подключение...",
+            paused = false
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
@@ -121,7 +143,7 @@ class NetSieveVpnService : VpnService() {
                 val bdThread = Thread({
                     val rc = NativeBridge.runByeDpi(args)
                     VpnState.log("ByeDPI завершил работу (rc=$rc)")
-                    if (!isStopping) {
+                    if (!isStopping && !isPaused) {
                         stopVpn()
                     }
                 }, "NetSieve-ByeDPI")
@@ -147,12 +169,16 @@ class NetSieveVpnService : VpnService() {
                 }
 
                 delay(200)
-                if (isStopping) return@launch
+                if (isStopping || isPaused) return@launch
 
                 VpnState.setStatus(VpnStatus.CONNECTED)
                 NetSieveTileService.requestSync(this@NetSieveVpnService)
                 VpnState.log("Защита активна (IPv4 + IPv6)")
-                updateNotification("NetSieve • ↓ 0 Б/с  ↑ 0 Б/с", "$shortStrategy • ↓ 0 Б  ↑ 0 Б")
+                updateNotification(
+                    title = "NetSieve • ↓ 0 Б/с  ↑ 0 Б/с",
+                    text = "$shortStrategy • ↓ 0 Б  ↑ 0 Б",
+                    paused = false
+                )
                 startStatsLoop(shortStrategy)
             } catch (ce: CancellationException) {
                 throw ce
@@ -160,9 +186,34 @@ class NetSieveVpnService : VpnService() {
                 VpnState.log("Ошибка запуска: ${t.message ?: t.javaClass.simpleName}")
                 VpnState.setStatus(VpnStatus.DISCONNECTED, t.message ?: "Ошибка запуска VPN")
                 NetSieveTileService.requestSync(this@NetSieveVpnService)
-                stopVpnInternal()
+                stopTunnelCore()
+                stopForegroundNotification()
                 stopSelf()
             }
+        }
+    }
+
+    private fun pauseVpn() {
+        if (isPaused || isStopping) return
+        if (VpnState.state.value.status != VpnStatus.CONNECTED &&
+            VpnState.state.value.status != VpnStatus.CONNECTING
+        ) {
+            return
+        }
+        isPaused = true
+        VpnState.log("Пауза NetSieve...")
+
+        serviceScope.launch {
+            stopTunnelCore()
+            if (isStopping) return@launch
+            VpnState.setStatus(VpnStatus.PAUSED)
+            NetSieveTileService.requestSync(this@NetSieveVpnService)
+            updateNotification(
+                title = "NetSieve • На паузе",
+                text = "Туннель приостановлен",
+                paused = true
+            )
+            VpnState.log("На паузе (уведомление в шторке активно)")
         }
     }
 
@@ -245,7 +296,7 @@ class NetSieveVpnService : VpnService() {
 
     private suspend fun waitForSocksReady(host: String, port: Int): Boolean {
         repeat(25) {
-            if (isStopping) return false
+            if (isStopping || isPaused) return false
             try {
                 Socket().use { socket ->
                     socket.connect(InetSocketAddress(host, port), 100)
@@ -266,11 +317,11 @@ class NetSieveVpnService : VpnService() {
             var prevMs = System.currentTimeMillis()
             var lastWasActive = false
 
-            while (isActive && !isStopping) {
+            while (isActive && !isStopping && !isPaused) {
                 try {
                     if (!TProxyService.TProxyIsRunning()) {
                         VpnState.log("hev-socks5-tunnel остановился")
-                        if (!isStopping) stopVpn()
+                        if (!isStopping && !isPaused) stopVpn()
                         break
                     }
                     val stats = TProxyService.TProxyGetStats()
@@ -297,7 +348,8 @@ class NetSieveVpnService : VpnService() {
                         if (hasTraffic || lastWasActive) {
                             updateNotification(
                                 title = "NetSieve • ↓ ${formatSpeed(rxSpeed)}  ↑ ${formatSpeed(txSpeed)}",
-                                text = "$shortStrategy • ↓ ${formatCompactBytes(rx)}  ↑ ${formatCompactBytes(tx)}"
+                                text = "$shortStrategy • ↓ ${formatCompactBytes(rx)}  ↑ ${formatCompactBytes(tx)}",
+                                paused = false
                             )
                             lastWasActive = hasTraffic
                         }
@@ -312,12 +364,14 @@ class NetSieveVpnService : VpnService() {
     private fun stopVpn() {
         if (isStopping) return
         isStopping = true
+        isPaused = false
         VpnState.setStatus(VpnStatus.DISCONNECTING)
         NetSieveTileService.requestSync(this)
         VpnState.log("Остановка NetSieve...")
 
         serviceScope.launch {
-            stopVpnInternal()
+            stopTunnelCore()
+            stopForegroundNotification()
             VpnState.setStatus(VpnStatus.DISCONNECTED)
             NetSieveTileService.requestSync(this@NetSieveVpnService)
             VpnState.log("Отключено")
@@ -326,8 +380,7 @@ class NetSieveVpnService : VpnService() {
     }
 
     @Synchronized
-    private fun stopVpnInternal() {
-        isStopping = true
+    private fun stopTunnelCore() {
         statsJob?.cancel()
         statsJob = null
 
@@ -343,7 +396,9 @@ class NetSieveVpnService : VpnService() {
 
         runCatching { byeDpiThread?.join(1500) }
         byeDpiThread = null
+    }
 
+    private fun stopForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -367,11 +422,20 @@ class NetSieveVpnService : VpnService() {
         }
     }
 
-    private fun buildNotification(title: String, text: String): Notification {
+    private fun buildNotification(title: String, text: String, paused: Boolean): Notification {
         val openIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val toggleIntent = PendingIntent.getService(
+            this,
+            if (paused) 2 else 3,
+            Intent(this, NetSieveVpnService::class.java).apply {
+                action = if (paused) ACTION_RESUME else ACTION_PAUSE
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -384,19 +448,28 @@ class NetSieveVpnService : VpnService() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_netsieve)
-            .setColor(0xFF0284C7.toInt())
+            .setColor(if (paused) 0xFFF59E0B.toInt() else 0xFF0284C7.toInt())
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openIntent)
-            .addAction(android.R.drawable.ic_media_pause, "Остановить", stopIntent)
+            .addAction(
+                if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+                if (paused) "Возобновить" else "Пауза",
+                toggleIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Остановить",
+                stopIntent
+            )
             .build()
     }
 
-    private fun updateNotification(title: String, text: String) {
+    private fun updateNotification(title: String, text: String, paused: Boolean) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(title, text))
+        nm.notify(NOTIFICATION_ID, buildNotification(title, text, paused))
     }
 
     private fun formatSpeed(bytesPerSec: Long): String {
