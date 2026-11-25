@@ -25,7 +25,6 @@ object NetSieveColors {
     val Emerald = Color(0xFF10B981)
     val Amber = Color(0xFFF59E0B)
     val Crimson = Color(0xFFEF4444)
-    val Sky = Color(0xFF38BDF8)
 }
 
 private val AirDarkScheme = darkColorScheme(
